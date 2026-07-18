@@ -6,7 +6,7 @@ CXX_WIN = x86_64-w64-mingw32-g++
 
 CFLAGS_WIN = -O2 -Iinclude -I.
 CXXFLAGS_WIN = -O2 -Iinclude -I.
-LDFLAGS_WIN = -shared -s -ld3d11 tools\libGMDXhook.def -Wl,--enable-stdcall-fixup
+LDFLAGS_WIN = -shared -static -s -ld3d11 tools\libGMDXhook.def -Wl,--enable-stdcall-fixup
 
 OBJ_DIR := build_temp
 RES_SOURCE := tools\resources.rc

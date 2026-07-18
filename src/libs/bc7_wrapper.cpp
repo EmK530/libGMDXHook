@@ -18,10 +18,6 @@ static uint32_t GetThreadCount()
 {
     uint32_t count = std::thread::hardware_concurrency();
 
-    // Leave one thread for the game/render thread
-    if (count > 1)
-        count--;
-
     return count;
 }
 

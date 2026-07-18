@@ -120,7 +120,7 @@ void RestoreDeviceContextVtable(void)
 
 uint8_t* bc7Data = NULL;
 UINT bc7RowPitch = (4096 / 4) * 16;
-UINT bc7DepthPitch = 4096*4096;
+UINT bc7DepthPitch = 4096 * 4096;
 
 void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Resource* pDstResource, UINT DstSubresource, const D3D11_BOX* pDstBox, const void* pSrcData, UINT SrcRowPitch, UINT SrcDepthPitch)
 {
