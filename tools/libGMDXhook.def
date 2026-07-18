@@ -1,0 +1,4 @@
+LIBRARY gmdxh.dll
+
+EXPORTS
+    D3D11CreateDevice=GM_D3D11CreateDevice
