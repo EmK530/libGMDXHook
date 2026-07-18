@@ -27,7 +27,7 @@
 bool started = false;
 bool donePatching = false;
 
-void CheckFormatSupport(ID3D11Device* device)
+bool CheckFormatSupport(ID3D11Device* device)
 {
     UINT formatSupport = 0;
     HRESULT hr = ID3D11Device_CheckFormatSupport(device, formatToConvertTo, &formatSupport);
@@ -35,16 +35,16 @@ void CheckFormatSupport(ID3D11Device* device)
     if (FAILED(hr)) {
         printf("[D3DHook] CheckFormatSupport call itself failed, hr=0x%08X\n", (unsigned)hr);
         MessageBoxA(NULL, "Function call to validate GPU format support failed!", "libGMDXHook Error!", MB_ICONERROR | MB_TOPMOST);
-        ExitProcess(0);
-        return;
+        return false;
     }
 
     if(!(formatSupport & D3D11_FORMAT_SUPPORT_TEXTURE2D) || !(formatSupport & D3D11_FORMAT_SUPPORT_SHADER_SAMPLE))
     {
         MessageBoxA(NULL, "Your GPU does not support this compression mode, sorry!", "libGMDXHook Error!", MB_ICONERROR | MB_TOPMOST);
-        ExitProcess(0);
-        return;
+        return false;
     }
+
+    return true;
 }
 
 #define MAX_TRACKED_TEXTURES 256
@@ -225,6 +225,8 @@ HRESULT WINAPI GM_D3D11CreateDevice(
         ppDevice, pFeatureLevel, ppImmediateContext);
 
     if (SUCCEEDED(hr) && ppDevice && *ppDevice) {
+        if(!CheckFormatSupport(*ppDevice))
+            return E_FAIL;
         printf("[D3DHook] Real device created at %p, patching vtable...\n", (void*)*ppDevice);
         PatchDeviceVtable(*ppDevice);
     }
