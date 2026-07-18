@@ -1,4 +1,4 @@
 .vscode
-build_temp
+build_temp*
 tools/resources.res
-gmdxh.dll
+gmdxh*.dll

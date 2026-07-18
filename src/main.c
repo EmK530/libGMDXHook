@@ -3,11 +3,26 @@
 #include <windows.h>
 
 #include "main.h"
-#include "libs/bc7_wrapper.h"
+#ifndef TEXTURE_MODE
+    #define TEXTURE_MODE 1
+#endif
+#if TEXTURE_MODE == 1
+    #include "libs/bc7_wrapper.h"
+#endif
+#if TEXTURE_MODE == 2
+    #include "libs/b4g4r4a4_convert.h"
+#endif
 
 #define false 0
 #define true 1
 #define bool char
+
+#if TEXTURE_MODE == 1
+    static enum DXGI_FORMAT formatToConvertTo = DXGI_FORMAT_BC7_UNORM;
+#endif
+#if TEXTURE_MODE == 2
+    static enum DXGI_FORMAT formatToConvertTo = DXGI_FORMAT_B4G4R4A4_UNORM;
+#endif
 
 bool started = false;
 bool donePatching = false;
@@ -15,7 +30,7 @@ bool donePatching = false;
 void CheckFormatSupport(ID3D11Device* device)
 {
     UINT formatSupport = 0;
-    HRESULT hr = ID3D11Device_CheckFormatSupport(device, DXGI_FORMAT_BC7_UNORM, &formatSupport);
+    HRESULT hr = ID3D11Device_CheckFormatSupport(device, formatToConvertTo, &formatSupport);
 
     if (FAILED(hr)) {
         printf("[D3DHook] CheckFormatSupport call itself failed, hr=0x%08X\n", (unsigned)hr);
@@ -64,7 +79,7 @@ HRESULT STDMETHODCALLTYPE GM_CreateTexture2D(
     if (pDesc->Width == 4096 && pDesc->Height == 4096 && !donePatching)
     {
         wasModified = true;
-        modifiedDesc.Format = DXGI_FORMAT_BC7_UNORM;
+        modifiedDesc.Format = formatToConvertTo;
     }
 
     printf("[D3DHook] CreateTexture2D: %ux%u format=%u (%d) mips=%u arraySize=%u "
@@ -88,7 +103,7 @@ HRESULT STDMETHODCALLTYPE GM_CreateShaderResourceView(ID3D11Device* This, ID3D11
 
     if (pDesc && IsTrackedTexture(pResource)) {
         modifiedDesc = *pDesc;
-        modifiedDesc.Format = DXGI_FORMAT_BC7_UNORM;
+        modifiedDesc.Format = formatToConvertTo;
         descToUse = &modifiedDesc;
         printf("[D3DHook] Adjusting SRV format for tracked texture %p\n", (void*)pResource);
     }
@@ -118,9 +133,11 @@ void RestoreDeviceContextVtable(void)
     g_isPatched = false;
 }
 
-uint8_t* bc7Data = NULL;
+uint8_t* converterBuffer = NULL;
 UINT bc7RowPitch = (4096 / 4) * 16;
 UINT bc7DepthPitch = 4096 * 4096;
+UINT b4RowPitch = 4096 * 2;
+UINT b4DepthPitch = 4096 * 4096 * 2;
 
 void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Resource* pDstResource, UINT DstSubresource, const D3D11_BOX* pDstBox, const void* pSrcData, UINT SrcRowPitch, UINT SrcDepthPitch)
 {
@@ -129,19 +146,28 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
         if(SrcDepthPitch == 67108864)
         {
             started = true;
-            if(!bc7Data)
-                bc7Data = malloc(4096 * 4096);
+#if TEXTURE_MODE == 1
+            if(!converterBuffer)
+                converterBuffer = malloc(bc7DepthPitch);
             printf("[D3DHook] Compressing texture atlas as BC7...\n");
-            ConvertRGBA8ToBC7((const uint8_t*)pSrcData, 4096, 4096, bc7Data);
-            realUpdateSubresource(This, pDstResource, DstSubresource, pDstBox, bc7Data, bc7RowPitch, bc7DepthPitch);
+            ConvertRGBA8ToBC7((const uint8_t*)pSrcData, 4096, 4096, converterBuffer);
+            realUpdateSubresource(This, pDstResource, DstSubresource, pDstBox, converterBuffer, bc7RowPitch, bc7DepthPitch);
+#endif
+#if TEXTURE_MODE == 2
+            if(!converterBuffer)
+                converterBuffer = malloc(b4DepthPitch);
+            printf("[D3DHook] Converting texture atlas to B4G4R4A4...\n");
+            ConvertRGBA8ToB4G4R4A4((const uint8_t*)pSrcData, 4096, 4096, (uint16_t*)converterBuffer);
+            realUpdateSubresource(This, pDstResource, DstSubresource, pDstBox, converterBuffer, b4RowPitch, b4DepthPitch);
+#endif
             return;
         }
         if(started && SrcDepthPitch != 67108864)
         {
             printf("[D3DHook] Restoring Device Context VTable...\n");
             donePatching = true;
-            if(bc7Data)
-                free(bc7Data);
+            if(converterBuffer)
+                free(converterBuffer);
             RestoreDeviceContextVtable();
         }
     }
