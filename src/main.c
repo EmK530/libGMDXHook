@@ -59,27 +59,78 @@ bool CheckFormatSupport(ID3D11Device* device)
 }
 
 #define MAX_TRACKED_TEXTURES 256
-ID3D11Texture2D* trackedTextures[MAX_TRACKED_TEXTURES];
+TrackedTexture trackedTextures[MAX_TRACKED_TEXTURES];
+
 int trackedTextureCount = 0;
 
-void TrackTexture(ID3D11Texture2D* tex) {
+void TrackTexture(ID3D11Texture2D* tex, int width, int height) {
     if (trackedTextureCount < MAX_TRACKED_TEXTURES) {
-        trackedTextures[trackedTextureCount++] = tex;
+        trackedTextures[trackedTextureCount++] = (TrackedTexture){.texturePointer = tex, .textureWidth = width, .textureHeight = height};
     }
 }
 
-bool IsTrackedTexture(ID3D11Resource* resource) {
+TrackedTexture* IsTrackedTexture(ID3D11Resource* resource) {
+    TrackedTexture* tex = trackedTextures;
     for (int i = 0; i < trackedTextureCount; i++) {
-        if ((ID3D11Resource*)trackedTextures[i] == resource) {
-            return true;
+        if ((ID3D11Resource*)(tex->texturePointer) == resource) {
+            return tex;
         }
+        tex++;
     }
-    return false;
+    return NULL;
 }
 
 PFN_CreateTexture2D realCreateTexture2D = NULL;
 PFN_CreateShaderResourceView realCreateShaderResourceView = NULL;
 PFN_UpdateSubresource realUpdateSubresource = NULL;
+
+ID3D11DeviceContext* g_deviceContext = NULL;
+ID3D11DeviceContextVtbl* g_originalVtbl = NULL;
+ID3D11DeviceContextVtbl* g_patchedVtbl = NULL;
+ID3D11DeviceContext* g_patchedContext = NULL;
+bool g_isPatched = false;
+
+void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Resource* pDstResource, UINT DstSubresource, const D3D11_BOX* pDstBox, const void* pSrcData, UINT SrcRowPitch, UINT SrcDepthPitch);
+
+void PatchDeviceContextVtable(ID3D11DeviceContext* context)
+{
+    if (g_isPatched) {
+        printf("[D3DHook] Context already patched, skipping\n");
+        return;
+    }
+
+    g_originalVtbl = context->lpVtbl; // save the REAL, driver-owned vtable pointer
+
+    g_patchedVtbl = malloc(sizeof(ID3D11DeviceContextVtbl));
+    memcpy(g_patchedVtbl, g_originalVtbl, sizeof(ID3D11DeviceContextVtbl));
+
+    realUpdateSubresource = g_originalVtbl->UpdateSubresource;
+    g_patchedVtbl->UpdateSubresource = GM_UpdateSubresource;
+
+    *(ID3D11DeviceContextVtbl**)context = g_patchedVtbl;
+
+    g_patchedContext = context;
+    g_isPatched = true;
+
+    printf("[D3DHook] Context patched: %p -> %p\n", (void*)g_originalVtbl, (void*)g_patchedVtbl);
+}
+
+void RestoreDeviceContextVtable(void)
+{
+    if (!g_isPatched || !g_patchedContext) {
+        printf("[D3DHook] Nothing to restore\n");
+        return;
+    }
+
+    *(ID3D11DeviceContextVtbl**)g_patchedContext = g_originalVtbl;
+
+    printf("[D3DHook] Context restored to original vtable %p\n", (void*)g_originalVtbl);
+
+    free(g_patchedVtbl);
+    g_patchedVtbl = NULL;
+    g_patchedContext = NULL;
+    g_isPatched = false;
+}
 
 HRESULT STDMETHODCALLTYPE GM_CreateTexture2D(
     ID3D11Device* This, const D3D11_TEXTURE2D_DESC* pDesc,
@@ -87,7 +138,7 @@ HRESULT STDMETHODCALLTYPE GM_CreateTexture2D(
 {
     D3D11_TEXTURE2D_DESC modifiedDesc = *pDesc;
     bool wasModified = false;
-    if (pDesc->Width == 4096 && pDesc->Height == 4096 && !donePatching)
+    if ((pDesc->Width == 2048 || pDesc->Width == 4096) && pDesc->Width == pDesc->Height && pDesc->Format == DXGI_FORMAT_R8G8B8A8_UNORM)
     {
         wasModified = true;
         modifiedDesc.Format = formatToConvertTo;
@@ -102,7 +153,14 @@ HRESULT STDMETHODCALLTYPE GM_CreateTexture2D(
 
     HRESULT hr = realCreateTexture2D(This, &modifiedDesc, pInitialData, ppTexture2D);
     if(SUCCEEDED(hr) && wasModified && ppTexture2D && *ppTexture2D)
-        TrackTexture(*ppTexture2D);
+    {
+        TrackTexture(*ppTexture2D, pDesc->Width, pDesc->Height);
+        if(!g_isPatched && g_deviceContext)
+        {
+            printf("[D3DHook] Atlas loaded into VRAM post-patch! Re-hooking...\n");
+            PatchDeviceContextVtable(g_deviceContext);
+        }
+    }
 
     return hr;
 }
@@ -122,34 +180,7 @@ HRESULT STDMETHODCALLTYPE GM_CreateShaderResourceView(ID3D11Device* This, ID3D11
     return realCreateShaderResourceView(This, pResource, descToUse, ppSRView);
 }
 
-ID3D11DeviceContextVtbl* g_originalVtbl = NULL;
-ID3D11DeviceContextVtbl* g_patchedVtbl = NULL;
-ID3D11DeviceContext* g_patchedContext = NULL;
-bool g_isPatched = false;
-
-void RestoreDeviceContextVtable(void)
-{
-    if (!g_isPatched || !g_patchedContext) {
-        printf("[D3DHook] Nothing to restore\n");
-        return;
-    }
-
-    *(ID3D11DeviceContextVtbl**)g_patchedContext = g_originalVtbl;
-
-    printf("[D3DHook] Context restored to original vtable %p\n", (void*)g_originalVtbl);
-
-    free(g_patchedVtbl);
-    g_patchedVtbl = NULL;
-    g_patchedContext = NULL;
-    g_isPatched = false;
-}
-
 uint8_t* converterBuffer = NULL;
-UINT bc7RowPitch = (4096 / 4) * 16;
-UINT bc7DepthPitch = 4096 * 4096;
-UINT b4RowPitch = 4096 * 2;
-UINT b4DepthPitch = 4096 * 4096 * 2;
-UINT RGBA8DepthPitch = 4096 * 4096 * 4;
 
 #if TEXTURE_MODE == 1 && ALLOW_CACHING == 1
     bool directoryNeverExisted = false;
@@ -227,14 +258,32 @@ UINT RGBA8DepthPitch = 4096 * 4096 * 4;
 
         printf("[D3DHook] Pruning complete, removed %d stale entries\n", prunedCount);
     }
+
+    BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+    {
+        switch (fdwReason)
+        {
+            case DLL_PROCESS_DETACH:
+                printf("[D3DHook] Process ending, cleanup time!\n");
+                PruneStaleCacheEntries();
+                break;
+            }
+        return TRUE;
+    }
 #endif
 
 void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Resource* pDstResource, UINT DstSubresource, const D3D11_BOX* pDstBox, const void* pSrcData, UINT SrcRowPitch, UINT SrcDepthPitch)
 {
     if(pDstBox)
     {
-        if(SrcDepthPitch == RGBA8DepthPitch)
+        TrackedTexture* tex = IsTrackedTexture(pDstResource);
+        if(tex != NULL)
         {
+            UINT bc7RowPitch    = ((tex->textureWidth + 3) / 4) * 16;
+            UINT bc7DepthPitch  = bc7RowPitch * ((tex->textureHeight + 3) / 4);
+            UINT RGBA8RowPitch  = tex->textureWidth * 4;
+            UINT RGBA8DepthPitch = RGBA8RowPitch * tex->textureHeight;
+
             #if TEXTURE_MODE == 1 && ALLOW_CACHING == 1
                 char searchPath[MAX_PATH];
                 XXH128_hash_t hash = XXH3_128bits(pSrcData, SrcDepthPitch);
@@ -270,6 +319,8 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
                         CloseHandle(hnd);
                         started = true;
                         realUpdateSubresource(This, pDstResource, DstSubresource, pDstBox, converterBuffer, bc7RowPitch, bc7DepthPitch);
+                        if(donePatching)
+                            goto restoreDevice;
                         return;
                     }
                 }
@@ -280,7 +331,7 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
             if(!converterBuffer)
                 converterBuffer = malloc(bc7DepthPitch);
             printf("[D3DHook] Compressing texture atlas as BC7...\n");
-            ConvertRGBA8ToBC7((const uint8_t*)pSrcData, 4096, 4096, converterBuffer);
+            ConvertRGBA8ToBC7((const uint8_t*)pSrcData, tex->textureWidth, tex->textureHeight, converterBuffer);
             realUpdateSubresource(This, pDstResource, DstSubresource, pDstBox, converterBuffer, bc7RowPitch, bc7DepthPitch);
         #if ALLOW_CACHING == 1
             printf("%s\n", searchPath);
@@ -293,6 +344,8 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
                 printf("[D3DHook] Cannot write texture cache, CreateFileA error!\n");
             }
         #endif
+            if(donePatching)
+                goto restoreDevice;
 #endif
 #if TEXTURE_MODE == 2
             if(!converterBuffer)
@@ -303,17 +356,21 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
 #endif
             return;
         }
-        if(started && SrcDepthPitch != RGBA8DepthPitch)
+        if(started && tex == NULL)
         {
+            restoreDevice:
             printf("[D3DHook] Restoring Device Context VTable...\n");
-            donePatching = true;
             if(converterBuffer)
+            {
                 free(converterBuffer);
-            #if TEXTURE_MODE == 1 && ALLOW_CACHING == 1
-                if(!directoryNeverExisted)
-                    PruneStaleCacheEntries();
-            #endif
+                converterBuffer = NULL;
+            }
             RestoreDeviceContextVtable();
+            if(donePatching) {
+                return;
+            } else {
+                donePatching = true;
+            }
         }
     }
 
@@ -337,29 +394,6 @@ void PatchDeviceVtable(ID3D11Device* device) {
            (void*)realCreateTexture2D, (void*)GM_CreateTexture2D);
 }
 
-void PatchDeviceContextVtable(ID3D11DeviceContext* context)
-{
-    if (g_isPatched) {
-        printf("[D3DHook] Context already patched, skipping\n");
-        return;
-    }
-
-    g_originalVtbl = context->lpVtbl; // save the REAL, driver-owned vtable pointer
-
-    g_patchedVtbl = malloc(sizeof(ID3D11DeviceContextVtbl));
-    memcpy(g_patchedVtbl, g_originalVtbl, sizeof(ID3D11DeviceContextVtbl));
-
-    realUpdateSubresource = g_originalVtbl->UpdateSubresource;
-    g_patchedVtbl->UpdateSubresource = GM_UpdateSubresource;
-
-    *(ID3D11DeviceContextVtbl**)context = g_patchedVtbl;
-
-    g_patchedContext = context;
-    g_isPatched = true;
-
-    printf("[D3DHook] Context patched: %p -> %p\n", (void*)g_originalVtbl, (void*)g_patchedVtbl);
-}
-
 HRESULT WINAPI GM_D3D11CreateDevice(
     IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software, UINT Flags,
     const D3D_FEATURE_LEVEL* pFeatureLevels, UINT FeatureLevels, UINT SDKVersion,
@@ -377,6 +411,7 @@ HRESULT WINAPI GM_D3D11CreateDevice(
     }
 
     if (SUCCEEDED(hr) && ppImmediateContext && *ppImmediateContext) {
+        g_deviceContext = *ppImmediateContext;
         printf("[D3DHook] Real device created at %p, patching context vtable...\n", (void*)*ppImmediateContext);
         PatchDeviceContextVtable(*ppImmediateContext);
     }
