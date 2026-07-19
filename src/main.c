@@ -1,13 +1,24 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <windows.h>
+#include <inttypes.h>
 
 #include "main.h"
+
 #ifndef TEXTURE_MODE
     #define TEXTURE_MODE 1
 #endif
+
 #if TEXTURE_MODE == 1
     #include "libs/bc7_wrapper.h"
+    #ifndef ALLOW_CACHING
+        #define ALLOW_CACHING 1
+    #endif
+    #if ALLOW_CACHING == 1
+        #define XXH_STATIC_LINKING_ONLY
+        #define XXH_IMPLEMENTATION
+        #include "external/xxhash/xxhash.h"
+    #endif
 #endif
 #if TEXTURE_MODE == 2
     #include "libs/b4g4r4a4_convert.h"
@@ -138,13 +149,132 @@ UINT bc7RowPitch = (4096 / 4) * 16;
 UINT bc7DepthPitch = 4096 * 4096;
 UINT b4RowPitch = 4096 * 2;
 UINT b4DepthPitch = 4096 * 4096 * 2;
+UINT RGBA8DepthPitch = 4096 * 4096 * 4;
+
+#if TEXTURE_MODE == 1 && ALLOW_CACHING == 1
+    bool directoryNeverExisted = false;
+    bool hasPerformedDirectoryCheck = false;
+
+    bool DirectoryExists(const char* path)
+    {
+        DWORD attrs = GetFileAttributesA(path);
+
+        if (attrs == INVALID_FILE_ATTRIBUTES) {
+            return false;
+        }
+
+        return (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    }
+
+    char seenHashes[MAX_TRACKED_TEXTURES][33];
+    int seenHashCount = 0;
+
+    void TrackSeenHash(const char* hashHex)
+    {
+        if (seenHashCount < MAX_TRACKED_TEXTURES) {
+            strncpy(seenHashes[seenHashCount], hashHex, 32);
+            seenHashes[seenHashCount][32] = '\0';
+            seenHashCount++;
+        }
+    }
+
+    bool WasHashSeen(const char* hashHex)
+    {
+        for (int i = 0; i < seenHashCount; i++) {
+            if (strncmp(seenHashes[i], hashHex, 32) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void PruneStaleCacheEntries(void)
+    {
+        printf("[D3DHook] Pruning stale cache entries...\n");
+
+        WIN32_FIND_DATAA findData;
+        HANDLE hFind = FindFirstFileA("libGMDXHook_textureCache\\*.bc7", &findData);
+
+        if (hFind == INVALID_HANDLE_VALUE) {
+            printf("[D3DHook] No cache files found to prune\n");
+            return;
+        }
+
+        int prunedCount = 0;
+
+        do {
+            char hashHex[33];
+            size_t nameLen = strlen(findData.cFileName);
+            if (nameLen != 36) {
+                continue; // not a file we recognize the naming pattern of
+            }
+            strncpy(hashHex, findData.cFileName, 32);
+            hashHex[32] = '\0';
+
+            if (!WasHashSeen(hashHex)) {
+                char fullPath[MAX_PATH];
+                snprintf(fullPath, sizeof(fullPath), "libGMDXHook_textureCache\\%s", findData.cFileName);
+                if (DeleteFileA(fullPath)) {
+                    printf("[D3DHook] Pruned stale cache entry: %s\n", findData.cFileName);
+                    prunedCount++;
+                } else {
+                    printf("[D3DHook] Failed to delete stale entry %s, err=%lu\n", findData.cFileName, GetLastError());
+                }
+            }
+        } while (FindNextFileA(hFind, &findData));
+
+        FindClose(hFind);
+
+        printf("[D3DHook] Pruning complete, removed %d stale entries\n", prunedCount);
+    }
+#endif
 
 void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Resource* pDstResource, UINT DstSubresource, const D3D11_BOX* pDstBox, const void* pSrcData, UINT SrcRowPitch, UINT SrcDepthPitch)
 {
     if(pDstBox)
     {
-        if(SrcDepthPitch == 67108864)
+        if(SrcDepthPitch == RGBA8DepthPitch)
         {
+            #if TEXTURE_MODE == 1 && ALLOW_CACHING == 1
+                char searchPath[MAX_PATH];
+                XXH128_hash_t hash = XXH3_128bits(pSrcData, SrcDepthPitch);
+                char hashHex[33];
+                snprintf(hashHex, sizeof(hashHex), "%016" PRIX64 "%016" PRIX64, hash.high64, hash.low64);
+                TrackSeenHash(hashHex);
+                printf("[D3DHook] Hash of incoming texture data is %s\n", hashHex);
+                snprintf(searchPath, MAX_PATH, "libGMDXHook_textureCache/%s.bc7", hashHex);
+                if(!hasPerformedDirectoryCheck)
+                {
+                    hasPerformedDirectoryCheck = true;
+                    if(!DirectoryExists("libGMDXHook_textureCache"))
+                    {
+                        directoryNeverExisted = true;
+                        CreateDirectoryA("libGMDXHook_textureCache", NULL);
+                    }
+                }
+                if(directoryNeverExisted)
+                    goto convertRealtime;
+                HANDLE hnd = CreateFileA(searchPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                if(hnd != INVALID_HANDLE_VALUE)
+                {
+                    printf("[D3DHook] Found texture in cache! Reading...\n");
+                    if(!converterBuffer)
+                        converterBuffer = malloc(bc7DepthPitch);
+                    DWORD bytesRead = 0;
+                    if(!ReadFile(hnd, converterBuffer, bc7DepthPitch, &bytesRead, NULL) || bytesRead != bc7DepthPitch)
+                    {
+                        printf("[D3DHook] Read error!\n");
+                        CloseHandle(hnd);
+                        goto convertRealtime;
+                    } else {
+                        CloseHandle(hnd);
+                        started = true;
+                        realUpdateSubresource(This, pDstResource, DstSubresource, pDstBox, converterBuffer, bc7RowPitch, bc7DepthPitch);
+                        return;
+                    }
+                }
+            #endif
+            convertRealtime:
             started = true;
 #if TEXTURE_MODE == 1
             if(!converterBuffer)
@@ -152,6 +282,17 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
             printf("[D3DHook] Compressing texture atlas as BC7...\n");
             ConvertRGBA8ToBC7((const uint8_t*)pSrcData, 4096, 4096, converterBuffer);
             realUpdateSubresource(This, pDstResource, DstSubresource, pDstBox, converterBuffer, bc7RowPitch, bc7DepthPitch);
+        #if ALLOW_CACHING == 1
+            printf("%s\n", searchPath);
+            HANDLE hnd2 = CreateFileA(searchPath, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+            if(hnd2 != INVALID_HANDLE_VALUE) {
+                if(!WriteFile(hnd2, converterBuffer, bc7DepthPitch, NULL, NULL))
+                    printf("[D3DHook] Cannot write texture cache, WriteFile error!\n");
+                CloseHandle(hnd2);
+            } else {
+                printf("[D3DHook] Cannot write texture cache, CreateFileA error!\n");
+            }
+        #endif
 #endif
 #if TEXTURE_MODE == 2
             if(!converterBuffer)
@@ -162,12 +303,16 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
 #endif
             return;
         }
-        if(started && SrcDepthPitch != 67108864)
+        if(started && SrcDepthPitch != RGBA8DepthPitch)
         {
             printf("[D3DHook] Restoring Device Context VTable...\n");
             donePatching = true;
             if(converterBuffer)
                 free(converterBuffer);
+            #if TEXTURE_MODE == 1 && ALLOW_CACHING == 1
+                if(!directoryNeverExisted)
+                    PruneStaleCacheEntries();
+            #endif
             RestoreDeviceContextVtable();
         }
     }

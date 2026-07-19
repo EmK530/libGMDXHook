@@ -1,11 +1,12 @@
 # libGMDXHook
-Custom Direct3D11 replacement that intercepts GameMaker's allocation of texture atlases on the GPU and converts them from R8G8B8A8_UNORM to BC7_UNORM.
+Custom Direct3D11 replacement that intercepts GameMaker's allocation of texture atlases on the GPU and converts them from 8-bit RGBA to either BC7 or 4-bit RGBA.
 > [!CAUTION]
->  This library is only recommended for use on low VRAM devices when necessary.<br>
->  Due to the nature of BC7 compression, boot times are way longer even with multithreading.
+>  This library is only recommended for use on low VRAM devices when absolutely necessary.<br>
+>  BC7 compression has artifacts and takes long to process, 4-bit RGBA has visible color banding.
 
 ## Attributions
 - BC7 Compressor: [bc7enc_rdo](https://github.com/richgel999/bc7enc_rdo) - Copyright(c) 2020-2021 Richard Geldreich, Jr.
+- Hashing Algorithm: [xxHash](https://github.com/cyan4973/xxhash) - Copyright (c) 2012-2021 Yann Collet
 
 ## How to use
 - Add the `gmdxh.dll` file to your game folder of choice.

@@ -22,17 +22,13 @@ static uint32_t GetThreadCount()
 }
 
 extern "C" {
-void ConvertRGBA8ToBC7(
-    const uint8_t* srcRGBA,
-    uint32_t width,
-    uint32_t height,
-    uint8_t* outBC7)
+void ConvertRGBA8ToBC7(const uint8_t* srcRGBA, uint32_t width, uint32_t height, uint8_t* outBC7)
 {
     std::call_once(bc7InitFlag, InitBC7);
     bc7enc_compress_block_params params;
     bc7enc_compress_block_params_init(&params);
 
-    params.m_max_partitions = 8;
+    params.m_max_partitions = 16;
     params.m_uber_level = 0;
     params.m_perceptual = false;
     params.m_try_least_squares = false;
@@ -70,21 +66,12 @@ void ConvertRGBA8ToBC7(
 
                 for (int y = 0; y < 4; y++)
                 {
-                    memcpy(
-                        blockPixels + y * 16,
-                        srcBlock + y * width * 4,
-                        16
-                    );
+                    memcpy(blockPixels + y * 16, srcBlock + y * width * 4, 16 );
                 }
 
-                uint8_t* outBlock =
-                    outBC7 + block * BC7ENC_BLOCK_SIZE;
+                uint8_t* outBlock = outBC7 + block * BC7ENC_BLOCK_SIZE;
 
-                bc7enc_compress_block(
-                    outBlock,
-                    blockPixels,
-                    &params
-                );
+                bc7enc_compress_block(outBlock, blockPixels, &params);
             }
         }
     };
