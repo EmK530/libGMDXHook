@@ -1,6 +1,6 @@
 1 VERSIONINFO
-FILEVERSION     1,2,0,0
-PRODUCTVERSION  1,2,0,0
+FILEVERSION     1,2,1,0
+PRODUCTVERSION  1,2,1,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -9,11 +9,11 @@ BEGIN
     BEGIN
 	  VALUE "CompanyName", "EmK530"
       VALUE "FileDescription", "GameMaker Direct3D11 hook for low VRAM devices"
-      VALUE "FileVersion", "1.2.0"
+      VALUE "FileVersion", "1.2.1"
       VALUE "InternalName", "libGMDXhook"
       VALUE "LegalCopyright", "(c) 2026 EmK530"
       VALUE "OriginalFilename", "gmdxh.dll"
-      VALUE "ProductVersion", "1.2.0.0"
+      VALUE "ProductVersion", "1.2.1.0"
     END
   END
   BLOCK "VarFileInfo"
