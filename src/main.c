@@ -281,6 +281,8 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
         {
             UINT bc7RowPitch    = ((tex->textureWidth + 3) / 4) * 16;
             UINT bc7DepthPitch  = bc7RowPitch * ((tex->textureHeight + 3) / 4);
+            UINT b4RowPitch     = tex->textureWidth * 2;
+            UINT b4DepthPitch   = b4RowPitch * tex->textureHeight;
             UINT RGBA8RowPitch  = tex->textureWidth * 4;
             UINT RGBA8DepthPitch = RGBA8RowPitch * tex->textureHeight;
 
