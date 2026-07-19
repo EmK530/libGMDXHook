@@ -353,7 +353,7 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
             if(!converterBuffer)
                 converterBuffer = malloc(b4DepthPitch);
             printf("[D3DHook] Converting texture atlas to B4G4R4A4...\n");
-            ConvertRGBA8ToB4G4R4A4((const uint8_t*)pSrcData, 4096, 4096, (uint16_t*)converterBuffer);
+            ConvertRGBA8ToB4G4R4A4((const uint8_t*)pSrcData, tex->textureWidth, tex->textureHeight, (uint16_t*)converterBuffer);
             realUpdateSubresource(This, pDstResource, DstSubresource, pDstBox, converterBuffer, b4RowPitch, b4DepthPitch);
 #endif
             return;
