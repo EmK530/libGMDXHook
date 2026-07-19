@@ -18,6 +18,9 @@ static uint32_t GetThreadCount()
 {
     uint32_t count = std::thread::hardware_concurrency();
 
+    if(count > 4)
+        count--;
+
     return count;
 }
 
