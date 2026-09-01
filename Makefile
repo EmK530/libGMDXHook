@@ -9,7 +9,7 @@ CXXFLAGS_WIN = -O2 -Iinclude -I. -Wl,--gc-sections -ffunction-sections -fdata-se
 LDFLAGS_WIN = -shared -static -s -ld3d11 -lshell32 tools\vsD3DHook.def -Wl,--enable-stdcall-fixup
 
 SRC_DIR := src
-EXT_DIR := external/bc7enc_rdo
+EXT_DIR := external
 
 RES_SOURCE := tools\resources.rc
 RES_FILE   := tools\resources.res
@@ -19,10 +19,13 @@ OUT_NAME := vsD3DHook.dll
 
 rwildcard = $(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))
 
-SRCS := $(call rwildcard,$(SRC_DIR)/,*.c)
-OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SRCS))
+C_SRCS := $(call rwildcard,$(SRC_DIR)/,*.c)
+CPP_SRCS := $(call rwildcard,$(SRC_DIR)/,*.cpp)
 
-EXT_SRCS := $(EXT_DIR)/bc7enc.cpp #src/libs/bc7_wrapper.cpp
+OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SRCS)) \
+        $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(CPP_SRCS))
+
+EXT_SRCS := $(EXT_DIR)/bc7enc_rdo/bc7enc.cpp $(EXT_DIR)/cJSON/cJSON.c #src/libs/bc7_wrapper.cpp
 EXT_OBJS := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(EXT_SRCS))
 
 MAKEFLAGS += -j32
@@ -49,3 +52,4 @@ $(OBJ_DIR)/%.o: %.cpp
 clean:
 	del "$(OUT_NAME)"
 	del "$(RES_FILE)"
+	rmdir /s /q "$(OBJ_DIR)"

@@ -1,6 +1,9 @@
 #include <stdio.h>
+#include <inttypes.h>
 
+#include "bc7_wrapper.h"
 #include "textureCompressor.h"
+#include "eligibilityChecker.h"
 
 #define STB_DXT_IMPLEMENTATION
 #include "external/stb/stb_dxt.h"
@@ -34,18 +37,32 @@ uint8_t* TC_CompressTexture(TrackedTexture* tex, const void* pSrcData, UINT* out
     UINT bc1DepthPitch  = bc1RowPitch * ((textureDesc->Height + 3) / 4);
     UINT bc7RowPitch    = ((textureDesc->Width + 3) / 4) * 16;
     UINT bc7DepthPitch  = bc7RowPitch * ((textureDesc->Height + 3) / 4);
+    UINT RGBA8RowPitch  = textureDesc->Width * 4;
+    UINT RGBA8DepthPitch = RGBA8RowPitch * textureDesc->Height;
 
-    if(!bc1TempBuffer)
-        bc1TempBuffer = malloc(bc1DepthPitch);
-    if(!bc1TempBuffer)
-        return NULL;
-
-    printf("[D3DHook::TC] Converting a texture atlas to BC1...\n");
-    textureDesc->Format = DXGI_FORMAT_BC1_UNORM;
-    compress_bc1((const uint8_t*)pSrcData, textureDesc->Width, textureDesc->Height, (uint8_t*)bc1TempBuffer);
-    *outRowPitch = bc1RowPitch;
-    *outDepthPitch = bc1DepthPitch;
-    return bc1TempBuffer;
+    if(EC_IsBC1Eligible(pSrcData, RGBA8DepthPitch)) {
+        if(!bc1TempBuffer)
+            bc1TempBuffer = malloc(bc1DepthPitch);
+        if(!bc1TempBuffer)
+            return NULL;
+        printf("[D3DHook::TC] Converting a texture atlas to BC1...\n");
+        textureDesc->Format = DXGI_FORMAT_BC1_UNORM;
+        compress_bc1((const uint8_t*)pSrcData, textureDesc->Width, textureDesc->Height, (uint8_t*)bc1TempBuffer);
+        *outRowPitch = bc1RowPitch;
+        *outDepthPitch = bc1DepthPitch;
+        return bc1TempBuffer;
+    } else {
+        if(!bc7TempBuffer)
+            bc7TempBuffer = malloc(bc7DepthPitch);
+        if(!bc7TempBuffer)
+            return NULL;
+        printf("[D3DHook::TC] Converting a texture atlas to BC7...\n");
+        textureDesc->Format = DXGI_FORMAT_BC7_UNORM;
+        ConvertRGBA8ToBC7((const uint8_t*)pSrcData, textureDesc->Width, textureDesc->Height, (uint8_t*)bc7TempBuffer);
+        *outRowPitch = bc7RowPitch;
+        *outDepthPitch = bc7DepthPitch;
+        return bc7TempBuffer;
+    }
 }
 
 void TC_Dispose() {

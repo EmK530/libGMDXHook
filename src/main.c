@@ -6,6 +6,7 @@
 #include "main.h"
 #include "textureTracking.h"
 #include "textureCompressor.h"
+#include "eligibilityChecker.h"
 
 PFN_CreateTexture2D realCreateTexture2D = NULL;
 PFN_CreateShaderResourceView realCreateShaderResourceView = NULL;
@@ -178,6 +179,7 @@ HRESULT WINAPI GM_D3D11CreateDevice(
     const D3D_FEATURE_LEVEL* pFeatureLevels, UINT FeatureLevels, UINT SDKVersion,
     ID3D11Device** ppDevice, D3D_FEATURE_LEVEL* pFeatureLevel, ID3D11DeviceContext** ppImmediateContext)
 {
+    EC_Init();
     HRESULT hr = D3D11CreateDevice(pAdapter, DriverType, Software, Flags,
         pFeatureLevels, FeatureLevels, SDKVersion,
         ppDevice, pFeatureLevel, ppImmediateContext);
@@ -195,9 +197,4 @@ HRESULT WINAPI GM_D3D11CreateDevice(
     }
 
     return hr;
-}
-
-int main()
-{
-    return 0;
 }
