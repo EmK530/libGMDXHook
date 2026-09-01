@@ -6,4 +6,4 @@
 
 void EC_Init();
 
-bool EC_IsBC1Eligible(const uint8_t* pSrcData, UINT pSrcDepth); 
+bool EC_IsBC1Eligible(const uint8_t* pSrcData, UINT width, UINT height, UINT pSrcDepth, uint64_t* outHash);

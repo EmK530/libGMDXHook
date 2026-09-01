@@ -4,7 +4,7 @@ SHELL      := C:\msys64\mingw64\bin\bash.exe
 CC_WIN = x86_64-w64-mingw32-gcc
 CXX_WIN = x86_64-w64-mingw32-g++
 
-CFLAGS_WIN = -O2 -Iinclude -I. -Wl,--gc-sections -ffunction-sections -fdata-sections -fopenmp
+CFLAGS_WIN = -O2 -Iinclude -I. -Wl,--gc-sections -ffunction-sections -fdata-sections
 CXXFLAGS_WIN = -O2 -Iinclude -I. -Wl,--gc-sections -ffunction-sections -fdata-sections
 LDFLAGS_WIN = -shared -static -s -ld3d11 -lshell32 tools\vsD3DHook.def -Wl,--enable-stdcall-fixup
 

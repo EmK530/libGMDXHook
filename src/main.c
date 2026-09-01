@@ -62,7 +62,6 @@ void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Res
                 printf("[D3DHook] Calling UpdateSubresource on texture handle %p (real: %p)\n", pDstResource, tex->realTexture);
                 realUpdateSubresource(This, (ID3D11Resource*)tex->realTexture, DstSubresource, pDstBox, buffer, outRowPitch, outDepthPitch);
             }
-            return;
         }
         if((started && tex == NULL) || (g_isPatched && donePatching))
         {
