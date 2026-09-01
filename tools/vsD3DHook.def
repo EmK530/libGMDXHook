@@ -1,4 +1,4 @@
-LIBRARY gmdxh.dll
+LIBRARY vsD3DHook.dll
 
 EXPORTS
     D3D11CreateDevice=GM_D3D11CreateDevice
