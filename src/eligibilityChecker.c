@@ -52,6 +52,9 @@ void EC_Init() {
     tempObj = cJSON_GetObjectItemCaseSensitive(root, "deleteUnusedTextureCachesOnExit");
     deleteUnusedTextureCachesOnExit = cJSON_IsBool(tempObj) ? cJSON_IsTrue(tempObj) : false;
 
+    tempObj = cJSON_GetObjectItemCaseSensitive(root, "_experiment_supportNonAtlases");
+    experimentSupportNonAtlases = cJSON_IsBool(tempObj) ? cJSON_IsTrue(tempObj) : false;
+
     tempObj = cJSON_GetObjectItemCaseSensitive(root, "_debug_force4bppCompression");
     debugForceBC1Textures = cJSON_IsBool(tempObj) ? cJSON_IsTrue(tempObj) : false;
     cJSON* dumpObj = cJSON_GetObjectItemCaseSensitive(root, "_debug_textureDumping");

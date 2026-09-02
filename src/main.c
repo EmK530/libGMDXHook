@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "main.h"
+#include "rootConfig.h"
 #include "textureTracking.h"
 #include "textureCompressor.h"
 #include "eligibilityChecker.h"
@@ -38,38 +39,43 @@ void RestoreDeviceContextVtable(void)
     g_isPatched = false;
 }
 
+static UINT Align4(UINT v) {
+    return (v + 3) & ~3u;
+}
+
 void STDMETHODCALLTYPE GM_UpdateSubresource(ID3D11DeviceContext* This, ID3D11Resource* pDstResource, UINT DstSubresource, const D3D11_BOX* pDstBox, const void* pSrcData, UINT SrcRowPitch, UINT SrcDepthPitch)
 {
     //printf("[D3DHook] Received UpdateSubresource for texture pointer %p\n", pDstResource);
 
     TrackedTexture* tex = ResolveResource(pDstResource);
 
-    if(pDstBox)
+    if(tex != NULL)
     {
-        if(tex != NULL)
-        {
-            started = true;
-            UINT outRowPitch;
-            UINT outDepthPitch;
-            uint8_t* buffer = TC_CompressTexture(tex, pSrcData, &outRowPitch, &outDepthPitch, &tex->originalDesc);
-            if(buffer == NULL)
-                return;
-            
-            printf("[D3DHook] Creating real texture for texture handle %p\n", (unsigned long long)tex->handle);
-            HRESULT hr = realCreateTexture2D(tex->device, &tex->originalDesc, NULL, &tex->realTexture);
-            if(SUCCEEDED(hr) && tex->realTexture)
-            {
-                printf("[D3DHook] Calling UpdateSubresource on texture handle %p (real: %p)\n", pDstResource, tex->realTexture);
-                realUpdateSubresource(This, (ID3D11Resource*)tex->realTexture, DstSubresource, pDstBox, buffer, outRowPitch, outDepthPitch);
-            }
+        started = true;
+        UINT outRowPitch;
+        UINT outDepthPitch;
+        uint8_t* buffer = TC_CompressTexture(tex, pSrcData, &outRowPitch, &outDepthPitch, &tex->originalDesc);
+        if(buffer == NULL)
+            return;
+        
+        if(experimentSupportNonAtlases) {
+            tex->originalDesc.Width = Align4(tex->originalDesc.Width);
+            tex->originalDesc.Height = Align4(tex->originalDesc.Height);
         }
-        if((started && tex == NULL) || (g_isPatched && donePatching))
+        printf("[D3DHook] Creating real texture for texture handle %p (res: %ix%i)\n", (unsigned long long)tex->handle, tex->originalDesc.Width, tex->originalDesc.Height);
+        HRESULT hr = realCreateTexture2D(tex->device, &tex->originalDesc, NULL, &tex->realTexture);
+        if(SUCCEEDED(hr) && tex->realTexture)
         {
-            printf("[D3DHook] Restoring Device Context VTable...\n");
-            RestoreDeviceContextVtable();
-            TC_Dispose();
-            donePatching = true;
+            printf("[D3DHook] Calling UpdateSubresource on texture handle %p (real: %p)\n", pDstResource, tex->realTexture);
+            realUpdateSubresource(This, (ID3D11Resource*)tex->realTexture, DstSubresource, NULL, buffer, outRowPitch, outDepthPitch);
         }
+    }
+    if((started && tex == NULL) || (g_isPatched && donePatching))
+    {
+        printf("[D3DHook] Restoring Device Context VTable...\n");
+        RestoreDeviceContextVtable();
+        TC_Dispose();
+        donePatching = true;
     }
 
     if(tex == NULL) // We can't pass a fake pointer
@@ -105,30 +111,31 @@ HRESULT STDMETHODCALLTYPE GM_CreateTexture2D(
 {
     D3D11_TEXTURE2D_DESC modifiedDesc = *pDesc;
     bool shouldModify = false;
-    if ((pDesc->Width == 2048 || pDesc->Width == 4096) && pDesc->Width == pDesc->Height && pDesc->Format == DXGI_FORMAT_R8G8B8A8_UNORM && pInitialData == NULL)
-        shouldModify = true;
+    if(pDesc->BindFlags == 0x8 && pDesc->CPUAccessFlags == 0x0 && pInitialData == NULL && pDesc->Format == DXGI_FORMAT_R8G8B8A8_UNORM) {
+        if((pDesc->Width > 256 && pDesc->Height > 256) && (pDesc->Width == pDesc->Height || experimentSupportNonAtlases)) {
+            shouldModify = true;
+        }
+    }
 
-    if(!shouldModify) {
-        /*
-        printf("[D3DHook] CreateTexture2D: %ux%u format=%u (%d) mips=%u arraySize=%u "
+    printf("[D3DHook] CreateTexture2D: %ux%u format=%u (%d) mips=%u arraySize=%u "
            "bindFlags=0x%X usage=%d cpuAccess=0x%X misc=0x%X hasInitialData=%s\n",
            pDesc->Width, pDesc->Height,
            pDesc->Format, pDesc->Format, pDesc->MipLevels, pDesc->ArraySize,
            pDesc->BindFlags, pDesc->Usage, pDesc->CPUAccessFlags, pDesc->MiscFlags,
            pInitialData ? "yes" : "no");
-        */
-        
+
+    if(!shouldModify) {
         return realCreateTexture2D(This, pDesc, pInitialData, ppTexture2D);
     }
 
     if(!g_isPatched) {
-        printf("[D3DHook] New atlas loaded post-boot, re-hooking!\n");
+        printf("[D3DHook] Eligible texture loaded, patching Device Context VTable...\n");
         PatchDeviceContextVtable(g_deviceContext);
     }
 
     uint64_t handle = TrackTexture(This, pDesc);
     if(handle == 0)
-        return E_OUTOFMEMORY;
+        return E_ABORT;
     *ppTexture2D = (ID3D11Texture2D*)(uintptr_t)handle;
 
     printf("[D3DHook] Returning fake CreateTexture2D pointer: %p\n", (void*)*ppTexture2D);
@@ -191,8 +198,6 @@ HRESULT WINAPI GM_D3D11CreateDevice(
     if (SUCCEEDED(hr) && ppImmediateContext && *ppImmediateContext) {
         printf("[D3DHook] Real context created at %p\n", (void*)*ppImmediateContext);
         g_deviceContext = *ppImmediateContext;
-        printf("[D3DHook] Real device created at %p, patching context vtable...\n", (void*)*ppImmediateContext);
-        PatchDeviceContextVtable(*ppImmediateContext);
     }
 
     return hr;

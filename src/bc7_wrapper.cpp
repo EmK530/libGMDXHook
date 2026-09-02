@@ -1,4 +1,5 @@
 #include "external/bc7enc_rdo/bc7enc.h"
+#include "rootConfig.h"
 
 #include <cstdint>
 #include <cstring>
@@ -6,6 +7,10 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
+
+static uint32_t Align4(uint32_t v) {
+    return (v + 3) & ~3u;
+}
 
 static std::once_flag bc7InitFlag;
 
@@ -37,8 +42,44 @@ extern "C" {
         params.m_try_least_squares = false;
         params.m_mode17_partition_estimation_filterbank = true;
 
-        uint32_t blocksWide = width / 4;
-        uint32_t blocksHigh = height / 4;
+        uint32_t alignedWidth = width;
+        uint32_t alignedHeight = height;
+        std::vector<uint8_t> paddedBuffer;
+        const uint8_t* workSrc = srcRGBA;
+        uint32_t workStride = width;
+
+        if (experimentSupportNonAtlases)
+        {
+            alignedWidth = Align4(width);
+            alignedHeight = Align4(height);
+            printf("[D3DHook::BC7] Aligning input data to %ix%i\n", alignedWidth, alignedHeight);
+
+            if (alignedWidth != width || alignedHeight != height)
+            {
+                paddedBuffer.resize((size_t)alignedWidth * alignedHeight * 4);
+
+                for (uint32_t y = 0; y < alignedHeight; y++)
+                {
+                    uint32_t srcY = (y < height) ? y : (height - 1);
+                    const uint8_t* srcRow = srcRGBA + (size_t)srcY * width * 4;
+                    uint8_t* dstRow = paddedBuffer.data() + (size_t)y * alignedWidth * 4;
+
+                    memcpy(dstRow, srcRow, (size_t)width * 4);
+
+                    // Replicate the last column to fill the padded width
+                    for (uint32_t x = width; x < alignedWidth; x++)
+                    {
+                        memcpy(dstRow + x * 4, srcRow + (size_t)(width - 1) * 4, 4);
+                    }
+                }
+
+                workSrc = paddedBuffer.data();
+                workStride = alignedWidth;
+            }
+        }
+
+        uint32_t blocksWide = alignedWidth / 4;
+        uint32_t blocksHigh = alignedHeight / 4;
         uint32_t totalBlocks = blocksWide * blocksHigh;
 
         std::atomic<uint32_t> nextBlock = 0;
@@ -65,11 +106,11 @@ extern "C" {
                     uint8_t blockPixels[64];
 
                     const uint8_t* srcBlock =
-                        srcRGBA + ((by * 4 * width) + (bx * 4)) * 4;
+                        workSrc + ((by * 4 * workStride) + (bx * 4)) * 4;
 
                     for (int y = 0; y < 4; y++)
                     {
-                        memcpy(blockPixels + y * 16, srcBlock + y * width * 4, 16 );
+                        memcpy(blockPixels + y * 16, srcBlock + y * workStride * 4, 16 );
                     }
 
                     uint8_t* outBlock = outBC7 + block * BC7ENC_BLOCK_SIZE;

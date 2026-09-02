@@ -6,6 +6,8 @@ bool enableBC1Textures = false;
 bool enableTextureCache = true;
 bool deleteUnusedTextureCachesOnExit = false;
 
+bool experimentSupportNonAtlases = false;
+
 bool debugForceBC1Textures = false;
 bool debugDumpUnrecognizedTextures = false;
 bool debugDumpAllTextures = false;
