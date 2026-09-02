@@ -52,8 +52,15 @@ void EC_Init() {
     tempObj = cJSON_GetObjectItemCaseSensitive(root, "deleteUnusedTextureCachesOnExit");
     deleteUnusedTextureCachesOnExit = cJSON_IsBool(tempObj) ? cJSON_IsTrue(tempObj) : false;
 
-    tempObj = cJSON_GetObjectItemCaseSensitive(root, "_experiment_supportNonAtlases");
-    experimentSupportNonAtlases = cJSON_IsBool(tempObj) ? cJSON_IsTrue(tempObj) : false;
+    cJSON* experimentObj = cJSON_GetObjectItemCaseSensitive(root, "_experiment_supportNonAtlases");
+    if(cJSON_IsObject(experimentObj)) {
+        tempObj = cJSON_GetObjectItemCaseSensitive(experimentObj, "enable");
+        experimentSupportNonAtlases = cJSON_IsBool(tempObj) ? cJSON_IsTrue(tempObj) : false;
+        tempObj = cJSON_GetObjectItemCaseSensitive(experimentObj, "minWidthRequired");
+        minWidthRequired = cJSON_IsNumber(tempObj) ? tempObj->valueint : 256;
+        tempObj = cJSON_GetObjectItemCaseSensitive(experimentObj, "minHeightRequired");
+        minHeightRequired = cJSON_IsNumber(tempObj) ? tempObj->valueint : 256;
+    }
 
     tempObj = cJSON_GetObjectItemCaseSensitive(root, "_debug_force4bppCompression");
     debugForceBC1Textures = cJSON_IsBool(tempObj) ? cJSON_IsTrue(tempObj) : false;

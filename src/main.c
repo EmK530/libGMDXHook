@@ -112,7 +112,7 @@ HRESULT STDMETHODCALLTYPE GM_CreateTexture2D(
     D3D11_TEXTURE2D_DESC modifiedDesc = *pDesc;
     bool shouldModify = false;
     if(pDesc->BindFlags == 0x8 && pDesc->CPUAccessFlags == 0x0 && pInitialData == NULL && pDesc->Format == DXGI_FORMAT_R8G8B8A8_UNORM) {
-        if((pDesc->Width > 256 && pDesc->Height > 256) && (pDesc->Width == pDesc->Height || experimentSupportNonAtlases)) {
+        if((pDesc->Width > minWidthRequired && pDesc->Height > minHeightRequired) && (pDesc->Width == pDesc->Height || experimentSupportNonAtlases)) {
             shouldModify = true;
         }
     }
