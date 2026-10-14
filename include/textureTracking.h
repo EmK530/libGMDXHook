@@ -5,20 +5,13 @@
 
 #define MAX_TRACKED_TEXTURES 2048
 
-#define TEXTURE_HANDLE_BASE 0xFFFF000000000000ULL
-#define TEXTURE_HANDLE_MASK 0xFFFF000000000000ULL
-
 typedef struct
 {
     uint64_t handle;
-
     ID3D11Device* device;
-
     D3D11_TEXTURE2D_DESC originalDesc;
-
     ID3D11Texture2D* realTexture;
 } TrackedTexture;
-
 
 uint64_t TrackTexture(
     ID3D11Device* device,

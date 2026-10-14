@@ -2,12 +2,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 static int trackedTextureCount = 0;
 
 TrackedTexture* trackedTextures = NULL;
-
-static uint64_t nextTextureHandle = TEXTURE_HANDLE_BASE;
 
 #define HASH_EMPTY    (-1)
 #define HASH_TOMBSTONE (-2)
@@ -87,9 +87,115 @@ static void HashUpdateIndex(uint64_t handle, int newIndex) {
     }
 }
 
-static int IsTextureHandle(uint64_t handle) {
-    return (handle & TEXTURE_HANDLE_MASK) == TEXTURE_HANDLE_BASE;
+typedef struct
+{
+    const ID3D11Texture2DVtbl* lpVtbl;
+    LONG refCount;
+} TextureProxy;
+
+// Spelled out here so linking doesn't need dxguid.
+static const GUID kIID_IUnknown        = {0x00000000, 0x0000, 0x0000, {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+static const GUID kIID_DeviceChild     = {0x1841e5c8, 0x16b0, 0x489b, {0xbc, 0xc8, 0x44, 0xcf, 0xb0, 0xd5, 0xde, 0xae}};
+static const GUID kIID_Resource        = {0xdc8e63f3, 0xd12b, 0x4952, {0xb4, 0x7b, 0x5e, 0x45, 0x02, 0x6a, 0x86, 0x2d}};
+static const GUID kIID_Texture2D       = {0x6f15aaf2, 0xd208, 0x4e89, {0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}};
+
+#define PROXY_HANDLE(This) ((uint64_t)(uintptr_t)(This))
+#define PROXY_REAL(This) (ResolveTexture(PROXY_HANDLE(This)) ? ResolveTexture(PROXY_HANDLE(This))->realTexture : NULL)
+
+static HRESULT STDMETHODCALLTYPE Proxy_QueryInterface(ID3D11Texture2D* This, REFIID riid, void** ppvObject) {
+    if (!ppvObject)
+        return E_POINTER;
+
+    if (IsEqualGUID(riid, &kIID_IUnknown) || IsEqualGUID(riid, &kIID_DeviceChild) ||
+        IsEqualGUID(riid, &kIID_Resource) || IsEqualGUID(riid, &kIID_Texture2D)) {
+        This->lpVtbl->AddRef(This);
+        *ppvObject = This;
+        return S_OK;
+    }
+
+    *ppvObject = NULL;
+    return E_NOINTERFACE;
 }
+
+static ULONG STDMETHODCALLTYPE Proxy_AddRef(ID3D11Texture2D* This) {
+    return (ULONG)InterlockedIncrement(&((TextureProxy*)This)->refCount);
+}
+
+static ULONG STDMETHODCALLTYPE Proxy_Release(ID3D11Texture2D* This) {
+    TextureProxy* proxy = (TextureProxy*)This;
+    ULONG refs = (ULONG)InterlockedDecrement(&proxy->refCount);
+    if (refs == 0) {
+        printf("[D3DHook] Game released texture handle %p, freeing real texture\n", (void*)proxy);
+        UntrackTexture(PROXY_HANDLE(proxy));
+        free(proxy);
+    }
+    return refs;
+}
+
+static void STDMETHODCALLTYPE Proxy_GetDevice(ID3D11Texture2D* This, ID3D11Device** ppDevice) {
+    TrackedTexture* tex = ResolveTexture(PROXY_HANDLE(This));
+    *ppDevice = tex ? tex->device : NULL;
+    if (*ppDevice)
+        (*ppDevice)->lpVtbl->AddRef(*ppDevice);
+}
+
+static HRESULT STDMETHODCALLTYPE Proxy_GetPrivateData(ID3D11Texture2D* This, REFGUID guid, UINT* pDataSize, void* pData) {
+    ID3D11Texture2D* real = PROXY_REAL(This);
+    if (real)
+        return real->lpVtbl->GetPrivateData(real, guid, pDataSize, pData);
+    if (pDataSize)
+        *pDataSize = 0;
+    return DXGI_ERROR_NOT_FOUND;
+}
+
+static HRESULT STDMETHODCALLTYPE Proxy_SetPrivateData(ID3D11Texture2D* This, REFGUID guid, UINT DataSize, const void* pData) {
+    ID3D11Texture2D* real = PROXY_REAL(This);
+    return real ? real->lpVtbl->SetPrivateData(real, guid, DataSize, pData) : S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE Proxy_SetPrivateDataInterface(ID3D11Texture2D* This, REFGUID guid, const IUnknown* pData) {
+    ID3D11Texture2D* real = PROXY_REAL(This);
+    return real ? real->lpVtbl->SetPrivateDataInterface(real, guid, pData) : S_OK;
+}
+
+static void STDMETHODCALLTYPE Proxy_GetType(ID3D11Texture2D* This, D3D11_RESOURCE_DIMENSION* pResourceDimension) {
+    *pResourceDimension = D3D11_RESOURCE_DIMENSION_TEXTURE2D;
+}
+
+static void STDMETHODCALLTYPE Proxy_SetEvictionPriority(ID3D11Texture2D* This, UINT EvictionPriority) {
+    ID3D11Texture2D* real = PROXY_REAL(This);
+    if (real)
+        real->lpVtbl->SetEvictionPriority(real, EvictionPriority);
+}
+
+static UINT STDMETHODCALLTYPE Proxy_GetEvictionPriority(ID3D11Texture2D* This) {
+    ID3D11Texture2D* real = PROXY_REAL(This);
+    return real ? real->lpVtbl->GetEvictionPriority(real) : DXGI_RESOURCE_PRIORITY_NORMAL;
+}
+
+static void STDMETHODCALLTYPE Proxy_GetDesc(ID3D11Texture2D* This, D3D11_TEXTURE2D_DESC* pDesc) {
+    TrackedTexture* tex = ResolveTexture(PROXY_HANDLE(This));
+    if (!tex) {
+        memset(pDesc, 0, sizeof(*pDesc));
+        return;
+    }
+    *pDesc = tex->originalDesc;
+    pDesc->Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+
+static const ID3D11Texture2DVtbl g_proxyVtbl = {
+    .QueryInterface = Proxy_QueryInterface,
+    .AddRef = Proxy_AddRef,
+    .Release = Proxy_Release,
+    .GetDevice = Proxy_GetDevice,
+    .GetPrivateData = Proxy_GetPrivateData,
+    .SetPrivateData = Proxy_SetPrivateData,
+    .SetPrivateDataInterface = Proxy_SetPrivateDataInterface,
+    .GetType = Proxy_GetType,
+    .SetEvictionPriority = Proxy_SetEvictionPriority,
+    .GetEvictionPriority = Proxy_GetEvictionPriority,
+    .GetDesc = Proxy_GetDesc,
+};
 
 uint64_t TrackTexture(ID3D11Device* device, const D3D11_TEXTURE2D_DESC* originalDesc) {
     if (!hashTableInitialized)
@@ -98,7 +204,13 @@ uint64_t TrackTexture(ID3D11Device* device, const D3D11_TEXTURE2D_DESC* original
     if (trackedTextureCount >= MAX_TRACKED_TEXTURES)
         return 0;
 
-    uint64_t handle = nextTextureHandle++;
+    TextureProxy* proxy = malloc(sizeof(TextureProxy));
+    if (!proxy)
+        return 0;
+    proxy->lpVtbl = &g_proxyVtbl;
+    proxy->refCount = 1;
+
+    uint64_t handle = PROXY_HANDLE(proxy);
     int index = trackedTextureCount++;
     TrackedTexture* texture = &trackedTextures[index];
     texture->handle = handle;
@@ -115,7 +227,7 @@ uint64_t TrackTexture(ID3D11Device* device, const D3D11_TEXTURE2D_DESC* original
 
 
 TrackedTexture* ResolveTexture(uint64_t handle) {
-    if (!IsTextureHandle(handle))
+    if (!hashTableInitialized)
         return NULL;
     int index = HashFind(handle);
     if (index < 0)

@@ -36,7 +36,6 @@ all: compile
 
 compile: $(OBJS) $(EXT_OBJS) $(RES_FILE)
 	$(CXX_WIN) $(CFLAGS_WIN) -o $(OUT_NAME) $(OBJS) $(EXT_OBJS) $(RES_FILE) $(LDFLAGS_WIN)
-	copy "$(OUT_NAME)" "C:\Users\EmK530\Desktop\vs_memopt\vsD3DHook.x"
 
 $(RES_FILE): $(RES_SOURCE)
 	windres $(RES_SOURCE) -O coff -o $(RES_FILE)
