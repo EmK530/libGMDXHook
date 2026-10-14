@@ -17,10 +17,3 @@ typedef void (STDMETHODCALLTYPE *PFN_UpdateSubresource)(
     const void *pSrcData,
     UINT SrcRowPitch,
     UINT SrcDepthPitch);
-
-typedef struct
-{
-    ID3D11Texture2D* texturePointer;
-    int textureWidth;
-    int textureHeight;
-} TrackedTexture;
